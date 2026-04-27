@@ -1,0 +1,12 @@
+.next
+node_modules
+.env
+.env.local
+.env.*.local
+.env.abacus-backup
+uploads
+public/uploads
+dist
+coverage
+*.log
+*.tsbuildinfo

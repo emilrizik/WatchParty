@@ -1,0 +1,281 @@
+generator client {
+    provider = "prisma-client-js"
+    binaryTargets = ["native"]
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+// NextAuth Models
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  password      String?
+  image         String?
+  isAdmin       Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  accounts      Account[]
+  sessions      Session[]
+  videos        Video[]
+  series        Series[]
+  createdRooms  Room[]     @relation("RoomCreator")
+  roomParticipants RoomParticipant[]
+  roomMessages RoomMessage[]
+  createdEpisodeRooms  EpisodeRoom[]  @relation("EpisodeRoomCreator")
+  episodeRoomParticipants EpisodeRoomParticipant[]
+  episodeRoomMessages EpisodeRoomMessage[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+  
+  @@unique([identifier, token])
+}
+
+// WatchParty Models
+model Category {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  
+  videos    Video[]
+  series    Series[]
+}
+
+model Video {
+  id                 String   @id @default(cuid())
+  title              String
+  description        String?
+  cloud_storage_path String
+  isPublic           Boolean  @default(true)
+  thumbnail_path     String?
+  thumbnailIsPublic  Boolean  @default(true)
+  duration           Int?     // in seconds
+  categoryId         String?
+  uploadedById       String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  
+  // HLS conversion
+  hlsPath            String?  // Path to .m3u8 file
+  hlsStatus          String   @default("pending") // pending, processing, completed, failed
+  
+  category           Category? @relation(fields: [categoryId], references: [id])
+  uploadedBy         User      @relation(fields: [uploadedById], references: [id])
+  rooms              Room[]
+  
+  @@index([categoryId])
+  @@index([uploadedById])
+}
+
+// Series with Seasons and Episodes
+model Series {
+  id               String   @id @default(cuid())
+  title            String
+  description      String?
+  thumbnail_path   String?
+  thumbnailIsPublic Boolean @default(true)
+  categoryId       String?
+  uploadedById     String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  
+  category         Category? @relation(fields: [categoryId], references: [id])
+  uploadedBy       User      @relation(fields: [uploadedById], references: [id])
+  seasons          Season[]
+  
+  @@index([categoryId])
+  @@index([uploadedById])
+}
+
+model Season {
+  id          String   @id @default(cuid())
+  seriesId    String
+  number      Int
+  title       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  series      Series   @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  episodes    Episode[]
+  
+  @@unique([seriesId, number])
+  @@index([seriesId])
+}
+
+model Episode {
+  id                 String   @id @default(cuid())
+  seasonId           String
+  number             Int
+  title              String
+  description        String?
+  cloud_storage_path String
+  isPublic           Boolean  @default(true)
+  thumbnail_path     String?
+  thumbnailIsPublic  Boolean  @default(true)
+  duration           Int?     // in seconds
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  
+  // HLS conversion
+  hlsPath            String?  // Path to .m3u8 file
+  hlsStatus          String   @default("pending") // pending, processing, completed, failed
+  
+  season             Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  rooms              EpisodeRoom[]
+  
+  @@unique([seasonId, number])
+  @@index([seasonId])
+}
+
+model EpisodeRoom {
+  id              String   @id @default(cuid())
+  code            String   @unique
+  name            String
+  episodeId       String
+  createdById     String?
+  createdByName   String   @default("Anónimo")
+  isActive        Boolean  @default(true)
+  
+  // Sync state
+  isPlaying       Boolean  @default(false)
+  currentTime     Float    @default(0)
+  lastUpdatedAt   DateTime @default(now())
+  lastUpdatedBy   String?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  episode         Episode  @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  createdBy       User?    @relation("EpisodeRoomCreator", fields: [createdById], references: [id])
+  participants    EpisodeRoomParticipant[]
+  messages        EpisodeRoomMessage[]
+  
+  @@index([code])
+  @@index([episodeId])
+  @@index([createdById])
+}
+
+model EpisodeRoomParticipant {
+  id         String   @id @default(cuid())
+  roomId     String
+  odysId     String?  // Optional user ID
+  guestName  String   @default("Invitado")
+  joinedAt   DateTime @default(now())
+  isActive   Boolean  @default(true)
+  
+  room       EpisodeRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user       User?       @relation(fields: [odysId], references: [id], onDelete: Cascade)
+  
+  @@index([roomId])
+  @@index([odysId])
+}
+
+model Room {
+  id              String   @id @default(cuid())
+  code            String   @unique
+  name            String
+  videoId         String
+  createdById     String?
+  createdByName   String   @default("Anónimo")
+  isActive        Boolean  @default(true)
+  
+  // Sync state
+  isPlaying       Boolean  @default(false)
+  currentTime     Float    @default(0)
+  lastUpdatedAt   DateTime @default(now())
+  lastUpdatedBy   String?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  video           Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  createdBy       User?    @relation("RoomCreator", fields: [createdById], references: [id])
+  participants    RoomParticipant[]
+  messages        RoomMessage[]
+  
+  @@index([code])
+  @@index([videoId])
+  @@index([createdById])
+}
+
+model RoomParticipant {
+  id         String   @id @default(cuid())
+  roomId     String
+  odysId     String?  // Optional user ID
+  guestName  String   @default("Invitado")
+  joinedAt   DateTime @default(now())
+  isActive   Boolean  @default(true)
+  
+  room       Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user       User?    @relation(fields: [odysId], references: [id], onDelete: Cascade)
+  
+  @@index([roomId])
+  @@index([odysId])
+}
+
+model RoomMessage {
+  id         String   @id @default(cuid())
+  roomId     String
+  odysId     String?
+  guestName  String   @default("Invitado")
+  message    String
+  createdAt  DateTime @default(now())
+  
+  room       Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user       User?    @relation(fields: [odysId], references: [id], onDelete: Cascade)
+  
+  @@index([roomId])
+  @@index([odysId])
+}
+
+model EpisodeRoomMessage {
+  id         String   @id @default(cuid())
+  roomId     String
+  odysId     String?
+  guestName  String   @default("Invitado")
+  message    String
+  createdAt  DateTime @default(now())
+  
+  room       EpisodeRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user       User?       @relation(fields: [odysId], references: [id], onDelete: Cascade)
+  
+  @@index([roomId])
+  @@index([odysId])
+}
