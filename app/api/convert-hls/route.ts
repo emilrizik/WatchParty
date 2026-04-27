@@ -1,193 +1,167 @@
-import { exec } from "child_process";
-import fs from "fs";
-import path from "path";
-import { promisify } from "util";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/db";
 import { getFileUrl } from "@/lib/s3";
 
-const execAsync = promisify(exec);
-
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 300; // 5 minutes max
 
-const isLocalStorage = () => process.env.STORAGE_MODE === "local";
-
-function getUploadDir() {
-  return process.env.UPLOAD_DIR || path.join(process.cwd(), "uploads");
-}
-
-async function optimizeForStreaming(
-  inputPath: string,
-  outputName: string
-): Promise<{ optimizedUrl: string } | null> {
+async function optimizeForStreaming(inputUrl: string, outputName: string): Promise<{ optimizedUrl: string } | null> {
   try {
-    if (isLocalStorage()) {
-      const outputDir = path.join(getUploadDir(), "optimized");
-      if (!fs.existsSync(outputDir)) {
-        fs.mkdirSync(outputDir, { recursive: true });
-      }
-
-      const outputPath = path.join(outputDir, `${outputName}.mp4`);
-      await execAsync(
-        `ffmpeg -i "${inputPath}" -c copy -movflags +faststart -f mp4 -y "${outputPath}"`,
-        { timeout: 600000 }
-      );
-
-      if (fs.existsSync(outputPath)) {
-        return { optimizedUrl: `/uploads/optimized/${outputName}.mp4` };
-      }
-
-      return null;
-    }
-
+    // Fast optimization - just move moov atom to beginning without re-encoding
+    // This is MUCH faster and allows videos to start playing immediately
     const ffmpegCommand = `-i {{in_1}} -c copy -movflags +faststart -f mp4 {{out_1}}`;
 
-    const createResponse = await fetch(
-      "https://apps.abacus.ai/api/createRunFfmpegCommandRequest",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          deployment_token: process.env.ABACUSAI_API_KEY,
-          input_files: { in_1: inputPath },
-          output_files: { out_1: `${outputName}.mp4` },
-          ffmpeg_command: ffmpegCommand,
-        }),
-      }
-    );
+    // Step 1: Create FFmpeg request
+    const createResponse = await fetch('https://apps.abacus.ai/api/createRunFfmpegCommandRequest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deployment_token: process.env.ABACUSAI_API_KEY,
+        input_files: { "in_1": inputUrl },
+        output_files: { "out_1": `${outputName}.mp4` },
+        ffmpeg_command: ffmpegCommand,
+      }),
+    });
 
     if (!createResponse.ok) {
+      const errText = await createResponse.text();
+      console.error('Failed to create FFmpeg request:', errText);
       return null;
     }
 
     const { request_id } = await createResponse.json();
     if (!request_id) {
+      console.error('No request_id returned');
       return null;
     }
 
-    let attempts = 0;
-    while (attempts < 600) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+    console.log('FFmpeg request created:', request_id);
 
-      const statusResponse = await fetch(
-        "https://apps.abacus.ai/api/getRunFfmpegCommandStatus",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            request_id,
-            deployment_token: process.env.ABACUSAI_API_KEY,
-          }),
-        }
-      );
+    // Step 2: Poll for status
+    const maxAttempts = 600; // 10 minutes max for longer videos
+    let attempts = 0;
+
+    while (attempts < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      const statusResponse = await fetch('https://apps.abacus.ai/api/getRunFfmpegCommandStatus', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_id, deployment_token: process.env.ABACUSAI_API_KEY }),
+      });
 
       const statusResult = await statusResponse.json();
-      const status = statusResult?.status || "PENDING";
+      const status = statusResult?.status || 'PENDING';
       const result = statusResult?.result || null;
 
-      if (status === "SUCCESS" && result?.result) {
-        return { optimizedUrl: result.result.out_1 };
-      }
-      if (status === "FAILED") {
+      console.log(`FFmpeg status (attempt ${attempts}): ${status}`);
+
+      if (status === 'SUCCESS' && result?.result) {
+        return { optimizedUrl: result.result['out_1'] };
+      } else if (status === 'FAILED') {
+        console.error('FFmpeg processing failed:', result?.error || statusResult);
         return null;
       }
-      attempts += 1;
+      attempts++;
     }
 
+    console.error('FFmpeg processing timed out');
     return null;
   } catch (error) {
-    console.error("Video optimization error:", error);
+    console.error('Video optimization error:', error);
     return null;
   }
 }
 
+// Convert a video to HLS
 export async function POST(req: NextRequest) {
   try {
+    // Allow internal calls without session (for background processing)
     const { videoId, episodeId, internalKey } = await req.json();
-
+    
+    // Validate either session or internal key
     const isInternalCall = internalKey === process.env.NEXTAUTH_SECRET;
     if (!isInternalCall) {
       const session = await getServerSession(authOptions);
-      if (!session?.user?.id || !session.user.isAdmin) {
+      if (!session?.user?.id) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
       }
     }
 
     if (!videoId && !episodeId) {
-      return NextResponse.json(
-        { error: "videoId or episodeId required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "videoId or episodeId required" }, { status: 400 });
     }
 
     let item: any;
-    let table: "video" | "episode";
+    let table: 'video' | 'episode';
 
     if (videoId) {
       item = await prisma.video.findUnique({ where: { id: videoId } });
-      table = "video";
+      table = 'video';
     } else {
       item = await prisma.episode.findUnique({ where: { id: episodeId } });
-      table = "episode";
+      table = 'episode';
     }
 
     if (!item) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
-    if (table === "video") {
+    // Update status to processing
+    if (table === 'video') {
       await prisma.video.update({
         where: { id: videoId },
-        data: { hlsStatus: "processing" },
+        data: { hlsStatus: 'processing' },
       });
     } else {
       await prisma.episode.update({
         where: { id: episodeId },
-        data: { hlsStatus: "processing" },
+        data: { hlsStatus: 'processing' },
       });
     }
 
-    const inputPath = isLocalStorage()
-      ? path.join(getUploadDir(), item.cloud_storage_path.replace(/^uploads\//, ""))
-      : await getFileUrl(item.cloud_storage_path, item.isPublic);
-
+    // Get video URL
+    const videoUrl = await getFileUrl(item.cloud_storage_path, item.isPublic);
     const outputName = `optimized_${Date.now()}_${item.id}`;
-    const result = await optimizeForStreaming(inputPath, outputName);
+
+    console.log('Starting video optimization for:', videoUrl);
+
+    // Start optimization (this may take a while)
+    const result = await optimizeForStreaming(videoUrl, outputName);
 
     if (result) {
-      if (table === "video") {
+      // Update with optimized path
+      if (table === 'video') {
         await prisma.video.update({
           where: { id: videoId },
-          data: { hlsPath: result.optimizedUrl, hlsStatus: "completed" },
+          data: { hlsPath: result.optimizedUrl, hlsStatus: 'completed' },
         });
       } else {
         await prisma.episode.update({
           where: { id: episodeId },
-          data: { hlsPath: result.optimizedUrl, hlsStatus: "completed" },
+          data: { hlsPath: result.optimizedUrl, hlsStatus: 'completed' },
         });
       }
+
       return NextResponse.json({ success: true, hlsUrl: result.optimizedUrl });
-    }
-
-    if (table === "video") {
-      await prisma.video.update({
-        where: { id: videoId },
-        data: { hlsStatus: "failed" },
-      });
     } else {
-      await prisma.episode.update({
-        where: { id: episodeId },
-        data: { hlsStatus: "failed" },
-      });
-    }
+      // Mark as failed
+      if (table === 'video') {
+        await prisma.video.update({
+          where: { id: videoId },
+          data: { hlsStatus: 'failed' },
+        });
+      } else {
+        await prisma.episode.update({
+          where: { id: episodeId },
+          data: { hlsStatus: 'failed' },
+        });
+      }
 
-    return NextResponse.json(
-      { error: "HLS conversion failed" },
-      { status: 500 }
-    );
+      return NextResponse.json({ error: "HLS conversion failed" }, { status: 500 });
+    }
   } catch (error: any) {
     console.error("HLS conversion error:", error);
     return NextResponse.json(

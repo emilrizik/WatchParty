@@ -27,11 +27,6 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  readStoredParticipant,
-  removeStoredParticipant,
-  writeStoredParticipant,
-} from "@/lib/client-storage";
 
 interface Video {
   id: string;
@@ -108,10 +103,11 @@ export function WatchClient({ videoId }: WatchClientProps) {
   useEffect(() => {
     const roomParam = searchParams.get("room");
     if (roomParam) {
-      const storedParticipant = readStoredParticipant(roomParam);
-      if (storedParticipant) {
-        setParticipantId(storedParticipant.id);
-        setGuestName(storedParticipant.name);
+      const stored = localStorage.getItem(`room_${roomParam}_participant`);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        setParticipantId(parsed.id);
+        setGuestName(parsed.name);
         fetchRoomAndJoin(roomParam);
       }
     }
@@ -366,10 +362,10 @@ export function WatchClient({ videoId }: WatchClientProps) {
       const roomData = await res.json();
       setParticipantId(roomData.participantId);
       
-      writeStoredParticipant(roomData.code, {
+      localStorage.setItem(`room_${roomData.code}_participant`, JSON.stringify({
         id: roomData.participantId,
         name,
-      });
+      }));
       
       const detailsRes = await fetch(`/api/rooms/${roomData.code}`);
       if (detailsRes.ok) {
@@ -399,10 +395,10 @@ export function WatchClient({ videoId }: WatchClientProps) {
       const joinData = await res.json();
       setParticipantId(joinData.participantId);
       
-      writeStoredParticipant(code, {
+      localStorage.setItem(`room_${code.toUpperCase()}_participant`, JSON.stringify({
         id: joinData.participantId,
         name,
-      });
+      }));
 
       const detailsRes = await fetch(`/api/rooms/${code.toUpperCase()}`);
       if (detailsRes.ok) {
@@ -434,7 +430,7 @@ export function WatchClient({ videoId }: WatchClientProps) {
         body: JSON.stringify({ participantId }),
       });
 
-      removeStoredParticipant(room.code);
+      localStorage.removeItem(`room_${room.code}_participant`);
       setRoom(null);
       setParticipantId(null);
       setGuestName("");

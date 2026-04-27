@@ -30,11 +30,6 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  readStoredParticipant,
-  removeStoredParticipant,
-  writeStoredParticipant,
-} from "@/lib/client-storage";
 
 interface Episode {
   id: string;
@@ -124,10 +119,11 @@ export function EpisodeWatchClient({ episodeId }: EpisodeWatchClientProps) {
   useEffect(() => {
     const roomParam = searchParams.get("room");
     if (roomParam) {
-      const storedParticipant = readStoredParticipant(roomParam);
-      if (storedParticipant) {
-        setParticipantId(storedParticipant.id);
-        setGuestName(storedParticipant.name);
+      const stored = localStorage.getItem(`room_${roomParam}_participant`);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        setParticipantId(parsed.id);
+        setGuestName(parsed.name);
         // Auto-join the room
         fetchRoomAndJoin(roomParam);
       }
@@ -408,10 +404,10 @@ export function EpisodeWatchClient({ episodeId }: EpisodeWatchClientProps) {
       setParticipantId(roomData.participantId);
       
       // Store in localStorage
-      writeStoredParticipant(roomData.code, {
+      localStorage.setItem(`room_${roomData.code}_participant`, JSON.stringify({
         id: roomData.participantId,
         name,
-      });
+      }));
 
       const detailsRes = await fetch(`/api/rooms/episode/${roomData.code}`);
       if (detailsRes.ok) {
@@ -444,10 +440,10 @@ export function EpisodeWatchClient({ episodeId }: EpisodeWatchClientProps) {
       setParticipantId(joinData.participantId);
       
       // Store in localStorage
-      writeStoredParticipant(code, {
+      localStorage.setItem(`room_${code.toUpperCase()}_participant`, JSON.stringify({
         id: joinData.participantId,
         name,
-      });
+      }));
 
       const detailsRes = await fetch(`/api/rooms/episode/${code.toUpperCase()}`);
       if (detailsRes.ok) {
@@ -485,7 +481,7 @@ export function EpisodeWatchClient({ episodeId }: EpisodeWatchClientProps) {
         body: JSON.stringify({ participantId }),
       });
 
-      removeStoredParticipant(room.code);
+      localStorage.removeItem(`room_${room.code}_participant`);
       setRoom(null);
       setParticipantId(null);
       setGuestName("");

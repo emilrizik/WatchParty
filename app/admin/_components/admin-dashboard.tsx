@@ -1,16 +1,24 @@
 "use client";
 
+import { signOut } from "next-auth/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Film, Upload, Settings, LogOut, Home } from "lucide-react";
+import { Film, Upload, Settings, Users, LogOut, Home } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-export function AdminDashboard() {
+interface AdminDashboardProps {
+  user: {
+    name?: string | null;
+    email?: string | null;
+  };
+}
+
+export function AdminDashboard({ user }: AdminDashboardProps) {
   const router = useRouter();
 
   const handleLogout = async () => {
-    await fetch("/api/admin/session", { method: "DELETE" });
+    await signOut({ redirect: false });
     router.replace("/admin/login");
   };
 
@@ -32,7 +40,7 @@ export function AdminDashboard() {
                   Ver sitio
                 </Button>
               </Link>
-              <span className="text-sm text-zinc-400">Modo administrador</span>
+              <span className="text-sm text-zinc-400">{user.name || user.email}</span>
               <Button variant="ghost" size="sm" onClick={handleLogout}>
                 <LogOut className="w-4 h-4" />
               </Button>
@@ -45,7 +53,7 @@ export function AdminDashboard() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <h1 className="text-3xl font-bold mb-8">Panel de Administración</h1>
         
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {/* Upload Card */}
           <Link href="/admin/upload">
             <Card className="bg-zinc-900 border-zinc-800 hover:border-primary/50 transition cursor-pointer h-full">
@@ -76,6 +84,20 @@ export function AdminDashboard() {
             </Card>
           </Link>
 
+          {/* Users Card */}
+          <Link href="/admin/users">
+            <Card className="bg-zinc-900 border-zinc-800 hover:border-primary/50 transition cursor-pointer h-full">
+              <CardHeader>
+                <div className="p-3 bg-purple-500/10 rounded-lg w-fit">
+                  <Users className="w-8 h-8 text-purple-500" />
+                </div>
+                <CardTitle className="text-white">Usuarios Admin</CardTitle>
+                <CardDescription className="text-zinc-400">
+                  Gestionar usuarios administradores
+                </CardDescription>
+              </CardHeader>
+            </Card>
+          </Link>
         </div>
       </div>
     </div>

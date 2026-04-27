@@ -1,7 +1,7 @@
 "use client";
 
+import { SessionProvider } from "next-auth/react";
 import { useEffect, useState } from "react";
-import { ClientErrorMonitor } from "@/components/client-error-monitor";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false);
@@ -14,10 +14,5 @@ export function Providers({ children }: { children: React.ReactNode }) {
     return null;
   }
 
-  return (
-    <>
-      <ClientErrorMonitor />
-      {children}
-    </>
-  );
+  return <SessionProvider>{children}</SessionProvider>;
 }

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAdminRequest } from "@/lib/admin-auth";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/db";
-import { deleteFile, getFileUrl } from "@/lib/s3";
+import { getFileUrl } from "@/lib/s3";
 
 export const dynamic = "force-dynamic";
 
@@ -51,24 +52,12 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    if (!isAdminRequest(req)) {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const { id } = await params;
-    const episode = await prisma.episode.findUnique({ where: { id } });
-    if (!episode) {
-      return NextResponse.json({ error: "Episode not found" }, { status: 404 });
-    }
-
-    await deleteFile(episode.cloud_storage_path);
-    if (episode.thumbnail_path) {
-      await deleteFile(episode.thumbnail_path);
-    }
-    if (episode.hlsPath) {
-      await deleteFile(episode.hlsPath);
-    }
-
     await prisma.episode.delete({ where: { id } });
     return NextResponse.json({ success: true });
   } catch (error: any) {

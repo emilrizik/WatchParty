@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAdminRequest } from "@/lib/admin-auth";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/db";
 import { getFileUrl } from "@/lib/s3";
 
@@ -72,7 +73,8 @@ export async function GET(req: NextRequest) {
 // POST create new series
 export async function POST(req: NextRequest) {
   try {
-    if (!isAdminRequest(req)) {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -82,19 +84,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Title is required" }, { status: 400 });
     }
 
-    const adminUser = await prisma.user.findFirst({
-      where: { isAdmin: true },
-      select: { id: true },
-      orderBy: { createdAt: "asc" },
-    });
-
-    if (!adminUser) {
-      return NextResponse.json(
-        { error: "No admin user configured" },
-        { status: 500 }
-      );
-    }
-
     const series = await prisma.series.create({
       data: {
         title,
@@ -102,7 +91,7 @@ export async function POST(req: NextRequest) {
         categoryId: categoryId || null,
         thumbnail_path,
         thumbnailIsPublic: thumbnailIsPublic ?? true,
-        uploadedById: adminUser.id,
+        uploadedById: session.user.id,
       },
     });
 

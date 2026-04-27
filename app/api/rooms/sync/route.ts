@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
       where: { code: roomCode.toUpperCase() },
     });
 
-    if (!room || !room.isActive) {
+    if (!room) {
       return NextResponse.json({ error: "Room not found" }, { status: 404 });
     }
 

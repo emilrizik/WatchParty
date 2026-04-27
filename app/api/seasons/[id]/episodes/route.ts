@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAdminRequest } from "@/lib/admin-auth";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/db";
 import { getFileUrl } from "@/lib/s3";
 
@@ -11,7 +12,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    if (!isAdminRequest(req)) {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -56,7 +58,7 @@ export async function POST(
     });
 
     // Trigger HLS conversion in background
-    fetch(`${process.env.NEXTAUTH_URL || "http://localhost:3001"}/api/convert-hls`, {
+    fetch(`${process.env.NEXTAUTH_URL}/api/convert-hls`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ episodeId: episode.id, internalKey: process.env.NEXTAUTH_SECRET }),
@@ -78,6 +80,11 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { id: seasonId } = await params;
     const episodes = await prisma.episode.findMany({
       where: { seasonId },

@@ -535,7 +535,7 @@ export function ManageClient() {
                         <div className="flex-1">
                           <h3 className="font-medium text-white">{video.title}</h3>
                           <p className="text-sm text-zinc-400">
-                            {video.category?.name || "Sin categoría"} • {new Date(video.createdAt).toLocaleDateString()}
+                            {video.category.name} • {new Date(video.createdAt).toLocaleDateString()}
                           </p>
                         </div>
                         <div className="flex items-center gap-3">
@@ -580,7 +580,7 @@ export function ManageClient() {
                           <div>
                             <h3 className="text-xl font-bold text-white">{s.title}</h3>
                             <p className="text-sm text-zinc-400">
-                              {s.category?.name || "Sin categoría"} • {s.seasons.length} temporada(s)
+                              {s.category.name} • {s.seasons.length} temporada(s)
                             </p>
                           </div>
                           <div className="flex gap-2">

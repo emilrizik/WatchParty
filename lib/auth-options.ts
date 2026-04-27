@@ -48,6 +48,11 @@ export const authOptions: NextAuthOptions = {
           throw new Error("Invalid credentials");
         }
 
+        // Only allow admin users to login
+        if (!user.isAdmin) {
+          throw new Error("Access denied");
+        }
+
         const isValid = await bcrypt.compare(
           credentials.password,
           user.password
@@ -71,7 +76,7 @@ export const authOptions: NextAuthOptions = {
     strategy: "jwt",
   },
   pages: {
-    signIn: "/auth/login",
+    signIn: "/admin/login",
   },
   callbacks: {
     async jwt({ token, user }) {

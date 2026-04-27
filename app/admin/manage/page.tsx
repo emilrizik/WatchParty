@@ -1,12 +1,31 @@
-import { redirect } from "next/navigation";
-import { isAdminAuthenticated } from "@/lib/admin-auth";
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { ManageClient } from "./_components/manage-client";
 
-export const dynamic = "force-dynamic";
+export default function AdminManagePage() {
+  const router = useRouter();
+  const [hasAccess, setHasAccess] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
-export default async function AdminManagePage() {
-  if (!(await isAdminAuthenticated())) {
-    redirect("/admin/login");
+  useEffect(() => {
+    setMounted(true);
+    const access = localStorage.getItem("adminAccess");
+    if (access === "true") {
+      setHasAccess(true);
+    } else {
+      router.push("/dashboard");
+    }
+  }, [router]);
+
+  if (!mounted || !hasAccess) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="animate-pulse text-muted-foreground">Cargando...</div>
+      </div>
+    );
   }
+
   return <ManageClient />;
 }

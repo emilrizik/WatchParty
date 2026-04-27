@@ -33,7 +33,7 @@ export async function GET(
       },
     });
 
-    if (!room || !room.isActive) {
+    if (!room) {
       return NextResponse.json({ error: "Room not found" }, { status: 404 });
     }
 

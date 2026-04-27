@@ -17,7 +17,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { writeStoredParticipant } from "@/lib/client-storage";
 
 interface Video {
   id: string;
@@ -133,10 +132,10 @@ export function DashboardClient() {
 
       if (res.ok) {
         const data = await res.json();
-        writeStoredParticipant(selectedRoom.code, {
+        localStorage.setItem(`room_${selectedRoom.code}_participant`, JSON.stringify({
           id: data.participantId,
           name: joinName.trim(),
-        });
+        }));
         
         if (selectedRoom.type === "episode") {
           router.push(`/watch/episode/${data.episode.id}?room=${selectedRoom.code}`);
@@ -158,12 +157,11 @@ export function DashboardClient() {
     try {
       setLoading(true);
       setError("");
-      let categoriesData: Category[] = [];
 
       // Fetch categories
       const categoriesRes = await fetch("/api/categories");
       if (categoriesRes.ok) {
-        categoriesData = await categoriesRes.json();
+        const categoriesData = await categoriesRes.json();
         setCategories(categoriesData);
       }
 
@@ -187,7 +185,7 @@ export function DashboardClient() {
         let seriesData = await seriesRes.json();
         // Filter by category if selected
         if (selectedCategory) {
-          const selectedCat = categoriesData.find((c) => c.slug === selectedCategory);
+          const selectedCat = categories.find((c) => c.slug === selectedCategory);
           if (selectedCat) {
             seriesData = seriesData.filter(
               (s: Series) => s.category?.id === selectedCat.id

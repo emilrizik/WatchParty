@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { writeStoredParticipant } from "@/lib/client-storage";
 
 interface RoomInfo {
   id: string;
@@ -88,10 +87,10 @@ export default function JoinRoomPage() {
       if (res.ok) {
         const data = await res.json();
         // Store participant info in localStorage
-        writeStoredParticipant(code, {
+        localStorage.setItem(`room_${code}_participant`, JSON.stringify({
           id: data.participantId,
           name: guestName.trim(),
-        });
+        }));
         
         // Redirect to watch page
         if (isEpisodeRoom) {

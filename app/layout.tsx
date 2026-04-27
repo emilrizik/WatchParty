@@ -1,4 +1,4 @@
-import type { Metadata, Viewport } from "next";
+import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
@@ -6,14 +6,6 @@ import { Providers } from "./providers";
 const inter = Inter({ subsets: ["latin"] });
 
 export const dynamic = "force-dynamic";
-
-export const viewport: Viewport = {
-  width: "device-width",
-  initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
-  viewportFit: "cover",
-};
 
 export const metadata: Metadata = {
   title: "WatchParty - Ver juntos, en cualquier lugar",

@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAdminRequest } from "@/lib/admin-auth";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth-options";
 import { generatePresignedUploadUrl } from "@/lib/s3";
 
 export async function POST(req: NextRequest) {
   try {
-    if (!isAdminRequest(req)) {
+    const session = await getServerSession(authOptions);
+    if (!session?.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
