@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getFileUrl } from "@/lib/s3";
+import {
+  cleanupVideoRoomPresence,
+  touchVideoParticipant,
+} from "@/lib/room-presence";
 
 export const dynamic = "force-dynamic";
 
@@ -10,9 +14,28 @@ export async function GET(
 ) {
   try {
     const { code } = await params;
+    const participantId = req.nextUrl.searchParams.get("participantId");
 
     const room = await prisma.room.findUnique({
       where: { code: code?.toUpperCase() },
+      select: { id: true, isActive: true },
+    });
+
+    if (!room || !room.isActive) {
+      return NextResponse.json({ error: "Room not found" }, { status: 404 });
+    }
+
+    if (participantId) {
+      await touchVideoParticipant(room.id, participantId);
+    }
+
+    const activeParticipants = await cleanupVideoRoomPresence(room.id);
+    if (activeParticipants === 0) {
+      return NextResponse.json({ error: "Room not found" }, { status: 404 });
+    }
+
+    const hydratedRoom = await prisma.room.findUnique({
+      where: { id: room.id },
       include: {
         video: {
           include: {
@@ -33,26 +56,25 @@ export async function GET(
       },
     });
 
-    if (!room) {
+    if (!hydratedRoom || !hydratedRoom.isActive) {
       return NextResponse.json({ error: "Room not found" }, { status: 404 });
     }
 
-    // Generate video URL
     const videoUrl = await getFileUrl(
-      room.video.cloud_storage_path,
-      room.video.isPublic
+      hydratedRoom.video.cloud_storage_path,
+      hydratedRoom.video.isPublic
     );
-    const thumbnailUrl = room.video.thumbnail_path
+    const thumbnailUrl = hydratedRoom.video.thumbnail_path
       ? await getFileUrl(
-          room.video.thumbnail_path,
-          room.video.thumbnailIsPublic
+          hydratedRoom.video.thumbnail_path,
+          hydratedRoom.video.thumbnailIsPublic
         )
       : null;
 
     return NextResponse.json({
-      ...room,
+      ...hydratedRoom,
       video: {
-        ...room.video,
+        ...hydratedRoom.video,
         videoUrl,
         thumbnailUrl,
       },

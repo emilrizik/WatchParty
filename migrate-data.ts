@@ -43,19 +43,37 @@ async function migrate() {
   console.log(`   Videos:     ${data.videos.length}`);
   console.log('');
 
+  const categoryIdMap = new Map<string, string>();
+  const userIdMap = new Map<string, string>();
+
   // 1. Categories
   console.log('\u2192 Migrando categorías...');
   for (const cat of data.categories) {
-    await prisma.category.upsert({
-      where: { id: cat.id },
-      update: {},
-      create: {
-        id: cat.id,
-        name: cat.name,
-        slug: cat.slug,
-        createdAt: new Date(cat.createdAt),
-      },
-    });
+    const existingCategory =
+      (await prisma.category.findUnique({ where: { id: cat.id } })) ||
+      (await prisma.category.findUnique({ where: { slug: cat.slug } })) ||
+      (await prisma.category.findUnique({ where: { name: cat.name } }));
+
+    if (existingCategory) {
+      const updated = await prisma.category.update({
+        where: { id: existingCategory.id },
+        data: {
+          name: cat.name,
+          slug: cat.slug,
+        },
+      });
+      categoryIdMap.set(cat.id, updated.id);
+    } else {
+      const created = await prisma.category.create({
+        data: {
+          id: cat.id,
+          name: cat.name,
+          slug: cat.slug,
+          createdAt: new Date(cat.createdAt),
+        },
+      });
+      categoryIdMap.set(cat.id, created.id);
+    }
   }
   console.log(`   \u2713 ${data.categories.length} categorías`);
 
@@ -65,19 +83,34 @@ async function migrate() {
     !u.email.includes('testuser') || u.isAdmin
   );
   for (const user of realUsers) {
-    await prisma.user.upsert({
-      where: { id: user.id },
-      update: {},
-      create: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        password: user.password,
-        isAdmin: user.isAdmin,
-        createdAt: new Date(user.createdAt),
-        updatedAt: new Date(user.updatedAt || user.createdAt),
-      },
-    });
+    const existingUser =
+      (await prisma.user.findUnique({ where: { id: user.id } })) ||
+      (await prisma.user.findUnique({ where: { email: user.email } }));
+
+    if (existingUser) {
+      const updated = await prisma.user.update({
+        where: { id: existingUser.id },
+        data: {
+          name: user.name,
+          password: user.password,
+          isAdmin: user.isAdmin,
+        },
+      });
+      userIdMap.set(user.id, updated.id);
+    } else {
+      const created = await prisma.user.create({
+        data: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          password: user.password,
+          isAdmin: user.isAdmin,
+          createdAt: new Date(user.createdAt),
+          updatedAt: new Date(user.updatedAt || user.createdAt),
+        },
+      });
+      userIdMap.set(user.id, created.id);
+    }
   }
   console.log(`   \u2713 ${realUsers.length} usuarios (${data.users.length - realUsers.length} test users omitidos)`);
 
@@ -93,8 +126,8 @@ async function migrate() {
         description: s.description,
         thumbnail_path: s.thumbnail_path,
         thumbnailIsPublic: s.thumbnailIsPublic,
-        categoryId: s.categoryId,
-        uploadedById: s.uploadedById,
+        categoryId: s.categoryId ? categoryIdMap.get(s.categoryId) ?? s.categoryId : null,
+        uploadedById: userIdMap.get(s.uploadedById) ?? s.uploadedById,
         createdAt: new Date(s.createdAt),
         updatedAt: new Date(s.updatedAt),
       },
@@ -157,16 +190,16 @@ async function migrate() {
           id: v.id,
           title: v.title,
           description: v.description,
-          cloud_storage_path: v.cloud_storage_path,
-          isPublic: v.isPublic,
-          thumbnail_path: v.thumbnail_path,
-          thumbnailIsPublic: v.thumbnailIsPublic,
-          duration: v.duration,
-          categoryId: v.categoryId,
-          uploadedById: v.uploadedById,
-          hlsPath: v.hlsPath,
-          hlsStatus: v.hlsStatus,
-          createdAt: new Date(v.createdAt),
+        cloud_storage_path: v.cloud_storage_path,
+        isPublic: v.isPublic,
+        thumbnail_path: v.thumbnail_path,
+        thumbnailIsPublic: v.thumbnailIsPublic,
+        duration: v.duration,
+        categoryId: v.categoryId ? categoryIdMap.get(v.categoryId) ?? v.categoryId : null,
+        uploadedById: userIdMap.get(v.uploadedById) ?? v.uploadedById,
+        hlsPath: v.hlsPath,
+        hlsStatus: v.hlsStatus,
+        createdAt: new Date(v.createdAt),
           updatedAt: new Date(v.updatedAt),
         },
       });

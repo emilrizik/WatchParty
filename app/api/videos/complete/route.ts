@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/db";
+import { resolveAdminWriterUserId } from "@/lib/admin-write-access";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.id) {
+    const writerUserId = await resolveAdminWriterUserId();
+    if (!writerUserId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -40,8 +39,8 @@ export async function POST(req: NextRequest) {
         thumbnailIsPublic: thumbnailIsPublic ?? true,
         duration: duration ?? null,
         categoryId: categoryId ?? null,
-        uploadedById: session.user.id,
-        hlsStatus: 'pending',
+        uploadedById: writerUserId,
+        hlsStatus: "pending",
       },
       include: {
         category: true,
@@ -55,13 +54,21 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Trigger HLS conversion in background
-    const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000';
+    const baseUrl = process.env.INTERNAL_APP_URL || process.env.NEXTAUTH_URL || "http://127.0.0.1:3001";
+
     fetch(`${baseUrl}/api/convert-hls`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ videoId: video.id, internalKey: process.env.NEXTAUTH_SECRET }),
     }).catch(console.error);
+
+    if (!thumbnail_path) {
+      fetch(`${baseUrl}/api/generate-thumbnail`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ videoId: video.id, internalKey: process.env.NEXTAUTH_SECRET }),
+      }).catch(console.error);
+    }
 
     return NextResponse.json(video, { status: 201 });
   } catch (error: any) {

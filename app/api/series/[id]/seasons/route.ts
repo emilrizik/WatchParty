@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/db";
 
 export async function GET(
@@ -8,11 +6,6 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) {
-      return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-    }
-
     const { id } = await params;
 
     const seasons = await prisma.season.findMany({
@@ -40,8 +33,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) {
+    const { resolveAdminWriterUserId } = await import("@/lib/admin-write-access");
+    const writerUserId = await resolveAdminWriterUserId();
+    if (!writerUserId) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     }
 

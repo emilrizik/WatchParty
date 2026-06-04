@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { cleanupVideoRoomPresence } from "@/lib/room-presence";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,6 @@ export async function POST(
       return NextResponse.json({ error: "Room not found" }, { status: 404 });
     }
 
-    // Mark participant as inactive
     await prisma.roomParticipant.updateMany({
       where: {
         id: participantId,
@@ -34,21 +34,7 @@ export async function POST(
       },
     });
 
-    // Check if any active participants remain
-    const activeParticipants = await prisma.roomParticipant.count({
-      where: {
-        roomId: room.id,
-        isActive: true,
-      },
-    });
-
-    // If no active participants, mark room as inactive
-    if (activeParticipants === 0) {
-      await prisma.room.update({
-        where: { id: room.id },
-        data: { isActive: false },
-      });
-    }
+    await cleanupVideoRoomPresence(room.id);
 
     return NextResponse.json({ message: "Left room successfully" });
   } catch (error: any) {

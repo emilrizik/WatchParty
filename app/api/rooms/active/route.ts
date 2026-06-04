@@ -1,14 +1,51 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getFileUrl } from "@/lib/s3";
+import { getRoomPresenceCutoff } from "@/lib/room-presence";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
-    // Get active video rooms
+    const cutoff = getRoomPresenceCutoff();
+
+    await prisma.roomParticipant.updateMany({
+      where: {
+        isActive: true,
+        lastSeenAt: { lt: cutoff },
+      },
+      data: { isActive: false },
+    });
+
+    await prisma.episodeRoomParticipant.updateMany({
+      where: {
+        isActive: true,
+        lastSeenAt: { lt: cutoff },
+      },
+      data: { isActive: false },
+    });
+
+    await prisma.room.updateMany({
+      where: {
+        isActive: true,
+        participants: { none: { isActive: true, lastSeenAt: { gte: cutoff } } },
+      },
+      data: { isActive: false },
+    });
+
+    await prisma.episodeRoom.updateMany({
+      where: {
+        isActive: true,
+        participants: { none: { isActive: true, lastSeenAt: { gte: cutoff } } },
+      },
+      data: { isActive: false },
+    });
+
     const videoRooms = await prisma.room.findMany({
-      where: { isActive: true },
+      where: {
+        isActive: true,
+        participants: { some: { isActive: true, lastSeenAt: { gte: cutoff } } },
+      },
       include: {
         video: {
           select: {
@@ -19,7 +56,7 @@ export async function GET(req: NextRequest) {
           },
         },
         participants: {
-          where: { isActive: true },
+          where: { isActive: true, lastSeenAt: { gte: cutoff } },
           select: {
             id: true,
             guestName: true,
@@ -29,9 +66,11 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: "desc" },
     });
 
-    // Get active episode rooms
     const episodeRooms = await prisma.episodeRoom.findMany({
-      where: { isActive: true },
+      where: {
+        isActive: true,
+        participants: { some: { isActive: true, lastSeenAt: { gte: cutoff } } },
+      },
       include: {
         episode: {
           include: {
@@ -50,7 +89,7 @@ export async function GET(req: NextRequest) {
           },
         },
         participants: {
-          where: { isActive: true },
+          where: { isActive: true, lastSeenAt: { gte: cutoff } },
           select: {
             id: true,
             guestName: true,
@@ -60,7 +99,6 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: "desc" },
     });
 
-    // Format video rooms
     const formattedVideoRooms = await Promise.all(
       videoRooms.map(async (room) => {
         const thumbnailUrl = room.video.thumbnail_path
@@ -83,7 +121,6 @@ export async function GET(req: NextRequest) {
       })
     );
 
-    // Format episode rooms
     const formattedEpisodeRooms = await Promise.all(
       episodeRooms.map(async (room) => {
         const thumbnailUrl = room.episode.season.series.thumbnail_path
@@ -111,7 +148,6 @@ export async function GET(req: NextRequest) {
       })
     );
 
-    // Combine and sort by creation date
     const allRooms = [...formattedVideoRooms, ...formattedEpisodeRooms].sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );

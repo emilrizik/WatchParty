@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import {
+  cleanupEpisodeRoomPresence,
+  touchEpisodeParticipant,
+} from "@/lib/room-presence";
 
 export const dynamic = "force-dynamic";
 
-// GET messages for an episode room
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ code: string }> }
@@ -12,13 +15,23 @@ export async function GET(
     const { code } = await params;
     const { searchParams } = new URL(req.url);
     const after = searchParams.get("after");
+    const participantId = searchParams.get("participantId");
 
     const room = await prisma.episodeRoom.findUnique({
       where: { code: code.toUpperCase() },
-      select: { id: true },
+      select: { id: true, isActive: true },
     });
 
-    if (!room) {
+    if (!room || !room.isActive) {
+      return NextResponse.json({ error: "Room not found" }, { status: 404 });
+    }
+
+    if (participantId) {
+      await touchEpisodeParticipant(room.id, participantId);
+    }
+
+    const activeParticipants = await cleanupEpisodeRoomPresence(room.id);
+    if (activeParticipants === 0) {
       return NextResponse.json({ error: "Room not found" }, { status: 404 });
     }
 
@@ -41,14 +54,13 @@ export async function GET(
   }
 }
 
-// POST send a message
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ code: string }> }
 ) {
   try {
     const { code } = await params;
-    const { message, guestName } = await req.json();
+    const { message, guestName, participantId } = await req.json();
 
     if (!message?.trim()) {
       return NextResponse.json({ error: "Message required" }, { status: 400 });
@@ -56,17 +68,32 @@ export async function POST(
 
     const room = await prisma.episodeRoom.findUnique({
       where: { code: code.toUpperCase() },
-      select: { id: true },
+      select: { id: true, isActive: true },
     });
 
-    if (!room) {
+    if (!room || !room.isActive) {
+      return NextResponse.json({ error: "Room not found" }, { status: 404 });
+    }
+
+    if (participantId) {
+      const active = await touchEpisodeParticipant(room.id, participantId);
+      if (!active) {
+        return NextResponse.json(
+          { error: "Participant not active in room" },
+          { status: 409 }
+        );
+      }
+    }
+
+    const activeParticipants = await cleanupEpisodeRoomPresence(room.id);
+    if (activeParticipants === 0) {
       return NextResponse.json({ error: "Room not found" }, { status: 404 });
     }
 
     const newMessage = await prisma.episodeRoomMessage.create({
       data: {
         roomId: room.id,
-        guestName: guestName || "Invitado",
+        guestName: guestName?.trim() || "Invitado",
         message: message.trim().slice(0, 500),
       },
     });

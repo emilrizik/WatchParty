@@ -1,19 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/db";
 import { getFileUrl } from "@/lib/s3";
+import { resolveAdminWriterUserId } from "@/lib/admin-write-access";
 
 export const dynamic = "force-dynamic";
 
-// POST create new episode
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.id) {
+    const writerUserId = await resolveAdminWriterUserId();
+    if (!writerUserId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -36,7 +34,6 @@ export async function POST(
       );
     }
 
-    // Check if season exists
     const season = await prisma.season.findUnique({ where: { id: seasonId } });
     if (!season) {
       return NextResponse.json({ error: "Season not found" }, { status: 404 });
@@ -50,19 +47,28 @@ export async function POST(
         description,
         cloud_storage_path,
         isPublic: isPublic ?? true,
-        thumbnail_path,
+        thumbnail_path: thumbnail_path ?? null,
         thumbnailIsPublic: thumbnailIsPublic ?? true,
         duration,
-        hlsStatus: 'pending',
+        hlsStatus: "pending",
       },
     });
 
-    // Trigger HLS conversion in background
-    fetch(`${process.env.NEXTAUTH_URL}/api/convert-hls`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+    const baseUrl = process.env.INTERNAL_APP_URL || process.env.NEXTAUTH_URL || "http://127.0.0.1:3001";
+
+    fetch(`${baseUrl}/api/convert-hls`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ episodeId: episode.id, internalKey: process.env.NEXTAUTH_SECRET }),
     }).catch(console.error);
+
+    if (!thumbnail_path) {
+      fetch(`${baseUrl}/api/generate-thumbnail`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ episodeId: episode.id, internalKey: process.env.NEXTAUTH_SECRET }),
+      }).catch(console.error);
+    }
 
     return NextResponse.json(episode);
   } catch (error: any) {
@@ -74,21 +80,15 @@ export async function POST(
   }
 }
 
-// GET all episodes in a season
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     const { id: seasonId } = await params;
     const episodes = await prisma.episode.findMany({
       where: { seasonId },
-      orderBy: { number: 'asc' },
+      orderBy: { number: "asc" },
     });
 
     const episodesWithUrls = await Promise.all(

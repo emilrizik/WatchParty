@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { cleanupVideoRoomPresence, upsertVideoGuestParticipant } from "@/lib/room-presence";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
-    const { code, guestName } = await req.json();
+    const { code, guestName, guestSessionId } = await req.json();
 
     if (!code) {
       return NextResponse.json(
@@ -16,34 +17,26 @@ export async function POST(req: NextRequest) {
 
     const participantName = guestName?.trim() || "Invitado";
 
-    // Find room
     const room = await prisma.room.findUnique({
       where: { code: code.toUpperCase() },
       include: {
         video: true,
-        participants: {
-          where: { isActive: true },
-        },
       },
     });
 
-    if (!room) {
+    if (!room || !room.isActive) {
       return NextResponse.json({ error: "Room not found" }, { status: 404 });
     }
 
-    if (!room.isActive) {
-      return NextResponse.json(
-        { error: "Room is not active" },
-        { status: 400 }
-      );
+    const activeParticipants = await cleanupVideoRoomPresence(room.id);
+    if (activeParticipants === 0) {
+      return NextResponse.json({ error: "Room not found" }, { status: 404 });
     }
 
-    // Add as new participant
-    const participant = await prisma.roomParticipant.create({
-      data: {
-        roomId: room.id,
-        guestName: participantName,
-      },
+    const participant = await upsertVideoGuestParticipant({
+      roomId: room.id,
+      guestName: participantName,
+      guestSessionId,
     });
 
     return NextResponse.json({

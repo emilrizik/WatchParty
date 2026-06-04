@@ -110,6 +110,54 @@ export async function generatePresignedUploadUrl(
   return { uploadUrl, cloud_storage_path };
 }
 
+export async function uploadBufferToStorage(
+  fileName: string,
+  contentType: string,
+  buffer: Buffer,
+  isPublic = false
+) {
+  const { uploadUrl, cloud_storage_path } = await generatePresignedUploadUrl(
+    fileName,
+    contentType,
+    isPublic
+  );
+
+  if (uploadUrl.startsWith("/api/upload-local")) {
+    const uploadUrlObject = new URL(uploadUrl, "http://localhost");
+    const targetPath = uploadUrlObject.searchParams.get("path");
+
+    if (!targetPath) {
+      throw new Error("Invalid local upload path");
+    }
+
+    const normalizedPath = targetPath.replace(/^\/+/, "").replace(/^uploads\//, "");
+    const localPath = path.join(getUploadDir(), normalizedPath);
+    fs.mkdirSync(path.dirname(localPath), { recursive: true });
+    fs.writeFileSync(localPath, buffer);
+    return { cloud_storage_path };
+  }
+
+  const urlParams = new URLSearchParams(uploadUrl.split("?")[1] ?? "");
+  const signedHeaders = urlParams.get("X-Amz-SignedHeaders") ?? "";
+  const uploadHeaders: HeadersInit = { "Content-Type": contentType };
+
+  if (signedHeaders.includes("content-disposition")) {
+    uploadHeaders["Content-Disposition"] = "attachment";
+  }
+
+  const response = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: uploadHeaders,
+    body: buffer,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to upload generated asset: ${response.status}`);
+  }
+
+  return { cloud_storage_path };
+}
+
 export async function initiateMultipartUpload(
   fileName: string,
   isPublic = false

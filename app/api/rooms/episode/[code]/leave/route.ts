@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { cleanupEpisodeRoomPresence } from "@/lib/room-presence";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,6 @@ export async function POST(
       return NextResponse.json({ error: "Room not found" }, { status: 404 });
     }
 
-    // Mark participant as inactive
     await prisma.episodeRoomParticipant.updateMany({
       where: {
         id: participantId,
@@ -32,21 +32,7 @@ export async function POST(
       data: { isActive: false },
     });
 
-    // Check if any active participants remain
-    const activeParticipants = await prisma.episodeRoomParticipant.count({
-      where: {
-        roomId: room.id,
-        isActive: true,
-      },
-    });
-
-    // If no active participants, mark room as inactive
-    if (activeParticipants === 0) {
-      await prisma.episodeRoom.update({
-        where: { id: room.id },
-        data: { isActive: false },
-      });
-    }
+    await cleanupEpisodeRoomPresence(room.id);
 
     return NextResponse.json({ success: true });
   } catch (error: any) {

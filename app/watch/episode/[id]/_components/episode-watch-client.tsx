@@ -30,6 +30,16 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  clearStoredRoomParticipant,
+  getStoredRoomParticipant,
+  setStoredRoomParticipant,
+} from "@/lib/client-storage";
+import {
+  getOrCreateGuestSessionId,
+  getStoredGuestName,
+  setStoredGuestName,
+} from "@/lib/guest-session";
 
 interface Episode {
   id: string;
@@ -98,10 +108,12 @@ export function EpisodeWatchClient({ episodeId }: EpisodeWatchClientProps) {
   const [copied, setCopied] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const lastSyncTimeRef = useRef<number>(0);
+  const lastBroadcastTimeRef = useRef<number>(0);
   const isUserActionRef = useRef(false);
 
   // Guest info
   const [guestName, setGuestName] = useState("");
+  const guestSessionIdRef = useRef<string | null>(null);
   const [participantId, setParticipantId] = useState<string | null>(null);
   const [showNameDialog, setShowNameDialog] = useState(false);
   const [nameInputValue, setNameInputValue] = useState("");
@@ -115,24 +127,30 @@ export function EpisodeWatchClient({ episodeId }: EpisodeWatchClientProps) {
   const [unreadCount, setUnreadCount] = useState(0);
   const lastMessageTimeRef = useRef<string | null>(null);
 
+  useEffect(() => {
+    guestSessionIdRef.current = getOrCreateGuestSessionId();
+    setGuestName((current) => current || getStoredGuestName());
+  }, []);
+
   // Check for room code in URL params
   useEffect(() => {
     const roomParam = searchParams.get("room");
     if (roomParam) {
-      const stored = localStorage.getItem(`room_${roomParam}_participant`);
+      const stored = getStoredRoomParticipant(roomParam);
       if (stored) {
-        const parsed = JSON.parse(stored);
-        setParticipantId(parsed.id);
-        setGuestName(parsed.name);
-        // Auto-join the room
-        fetchRoomAndJoin(roomParam);
+        setParticipantId(stored.id);
+        setGuestName(stored.name);
+        fetchRoomAndJoin(roomParam, stored.id);
+      } else if (guestSessionIdRef.current && getStoredGuestName()) {
+        joinRoom(roomParam, getStoredGuestName(), true);
       }
     }
   }, [searchParams]);
 
-  const fetchRoomAndJoin = async (code: string) => {
+  const fetchRoomAndJoin = async (code: string, nextParticipantId?: string | null) => {
     try {
-      const res = await fetch(`/api/rooms/episode/${code}`);
+      const participantQuery = nextParticipantId ? `?participantId=${encodeURIComponent(nextParticipantId)}` : "";
+      const res = await fetch(`/api/rooms/episode/${code}${participantQuery}`);
       if (res.ok) {
         const roomData: Room = await res.json();
         setRoom(roomData);
@@ -169,7 +187,7 @@ export function EpisodeWatchClient({ episodeId }: EpisodeWatchClientProps) {
       }, 1500);
       return () => clearInterval(pollInterval);
     }
-  }, [room, episodeId]);
+  }, [room, episodeId, participantId]);
 
   // Poll chat messages
   useEffect(() => {
@@ -181,7 +199,7 @@ export function EpisodeWatchClient({ episodeId }: EpisodeWatchClientProps) {
       setMessages([]);
       lastMessageTimeRef.current = null;
     }
-  }, [room]);
+  }, [room, participantId, chatOpen]);
 
   // Auto-scroll chat
   useEffect(() => {
@@ -215,9 +233,11 @@ export function EpisodeWatchClient({ episodeId }: EpisodeWatchClientProps) {
   const fetchMessages = async () => {
     if (!room) return;
     try {
-      const url = lastMessageTimeRef.current
-        ? `/api/rooms/episode/${room.code}/messages?after=${encodeURIComponent(lastMessageTimeRef.current)}`
-        : `/api/rooms/episode/${room.code}/messages`;
+      const params = new URLSearchParams();
+      if (lastMessageTimeRef.current) params.set("after", lastMessageTimeRef.current);
+      if (participantId) params.set("participantId", participantId);
+      const query = params.toString();
+      const url = `/api/rooms/episode/${room.code}/messages${query ? `?${query}` : ""}`;
 
       const res = await fetch(url);
       if (!res.ok) return;
@@ -250,7 +270,7 @@ export function EpisodeWatchClient({ episodeId }: EpisodeWatchClientProps) {
       const res = await fetch(`/api/rooms/episode/${room.code}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: newMessage.trim(), guestName }),
+        body: JSON.stringify({ message: newMessage.trim(), guestName, participantId }),
       });
 
       if (res.ok) {
@@ -287,8 +307,16 @@ export function EpisodeWatchClient({ episodeId }: EpisodeWatchClientProps) {
     if (!room || isSyncing) return;
 
     try {
-      const res = await fetch(`/api/rooms/episode/${room.code}`);
-      if (!res.ok) return;
+      const query = participantId ? `?participantId=${encodeURIComponent(participantId)}` : "";
+      const res = await fetch(`/api/rooms/episode/${room.code}${query}`);
+      if (!res.ok) {
+        if (res.status === 404 || res.status === 409) {
+          clearStoredRoomParticipant(room.code);
+          setRoom(null);
+          setParticipantId(null);
+        }
+        return;
+      }
 
       const updatedRoom: Room = await res.json();
       const serverUpdateTime = new Date(updatedRoom.lastUpdatedAt).getTime();
@@ -339,7 +367,7 @@ export function EpisodeWatchClient({ episodeId }: EpisodeWatchClientProps) {
     try {
       isUserActionRef.current = true;
 
-      await fetch("/api/rooms/episode/sync", {
+      const res = await fetch("/api/rooms/episode/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -350,6 +378,13 @@ export function EpisodeWatchClient({ episodeId }: EpisodeWatchClientProps) {
           episodeId: newEpisodeId,
         }),
       });
+
+      if (!res.ok && (res.status === 404 || res.status === 409)) {
+        clearStoredRoomParticipant(room.code);
+        setRoom(null);
+        setParticipantId(null);
+        return;
+      }
 
       lastSyncTimeRef.current = Date.now();
 
@@ -370,8 +405,9 @@ export function EpisodeWatchClient({ episodeId }: EpisodeWatchClientProps) {
   };
 
   const confirmName = async () => {
-    const name = nameInputValue.trim() || "Invitado";
+    const name = nameInputValue.trim() || guestName.trim() || getStoredGuestName() || "Invitado";
     setGuestName(name);
+    setStoredGuestName(name);
     setShowNameDialog(false);
 
     if (pendingAction === "create") {
@@ -385,6 +421,7 @@ export function EpisodeWatchClient({ episodeId }: EpisodeWatchClientProps) {
   };
 
   const createRoom = async (name: string) => {
+    const guestSessionId = guestSessionIdRef.current ?? getOrCreateGuestSessionId();
     try {
       const res = await fetch("/api/rooms/episode/create", {
         method: "POST",
@@ -393,6 +430,7 @@ export function EpisodeWatchClient({ episodeId }: EpisodeWatchClientProps) {
           episodeId,
           name: `${episode?.season.series.title} - S${episode?.season.number}E${episode?.number}`,
           guestName: name,
+          guestSessionId,
         }),
       });
 
@@ -402,14 +440,15 @@ export function EpisodeWatchClient({ episodeId }: EpisodeWatchClientProps) {
 
       const roomData = await res.json();
       setParticipantId(roomData.participantId);
+      setStoredGuestName(name);
       
       // Store in localStorage
-      localStorage.setItem(`room_${roomData.code}_participant`, JSON.stringify({
+      setStoredRoomParticipant(roomData.code, {
         id: roomData.participantId,
         name,
-      }));
+      });
 
-      const detailsRes = await fetch(`/api/rooms/episode/${roomData.code}`);
+      const detailsRes = await fetch(`/api/rooms/episode/${roomData.code}?participantId=${encodeURIComponent(roomData.participantId)}`);
       if (detailsRes.ok) {
         const fullRoom: Room = await detailsRes.json();
         setRoom(fullRoom);
@@ -424,28 +463,33 @@ export function EpisodeWatchClient({ episodeId }: EpisodeWatchClientProps) {
     }
   };
 
-  const joinRoom = async (code: string, name: string) => {
+  const joinRoom = async (code: string, name: string, silent = false) => {
+    const guestSessionId = guestSessionIdRef.current ?? getOrCreateGuestSessionId();
     try {
       const res = await fetch("/api/rooms/episode/join", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, guestName: name }),
+        body: JSON.stringify({ code, guestName: name, guestSessionId }),
       });
 
       if (!res.ok) {
-        throw new Error("Sala no encontrada");
+        if (!silent) {
+          throw new Error("Sala no encontrada");
+        }
+        return;
       }
 
       const joinData = await res.json();
       setParticipantId(joinData.participantId);
+      setStoredGuestName(name);
       
       // Store in localStorage
-      localStorage.setItem(`room_${code.toUpperCase()}_participant`, JSON.stringify({
+      setStoredRoomParticipant(code, {
         id: joinData.participantId,
         name,
-      }));
+      });
 
-      const detailsRes = await fetch(`/api/rooms/episode/${code.toUpperCase()}`);
+      const detailsRes = await fetch(`/api/rooms/episode/${code.toUpperCase()}?participantId=${encodeURIComponent(joinData.participantId)}`);
       if (detailsRes.ok) {
         const roomData: Room = await detailsRes.json();
         setRoom(roomData);
@@ -481,10 +525,10 @@ export function EpisodeWatchClient({ episodeId }: EpisodeWatchClientProps) {
         body: JSON.stringify({ participantId }),
       });
 
-      localStorage.removeItem(`room_${room.code}_participant`);
+      clearStoredRoomParticipant(room.code);
       setRoom(null);
       setParticipantId(null);
-      setGuestName("");
+      setGuestName(getStoredGuestName());
       setChatOpen(false);
       router.replace(`/watch/episode/${episodeId}`);
     } catch (err) {
@@ -511,7 +555,21 @@ export function EpisodeWatchClient({ episodeId }: EpisodeWatchClientProps) {
 
   const handleSeeked = () => {
     if (!videoRef.current || isSyncing || !room) return;
+    lastBroadcastTimeRef.current = Date.now();
     updateRoomState(!videoRef.current.paused, videoRef.current.currentTime);
+  };
+
+  const handleTimeUpdate = () => {
+    if (!videoRef.current || !room || isSyncing || isUserActionRef.current) return;
+
+    const now = Date.now();
+    const isPlaying = !videoRef.current.paused;
+    if (!isPlaying) return;
+
+    if (now - lastBroadcastTimeRef.current < 1200) return;
+
+    lastBroadcastTimeRef.current = now;
+    updateRoomState(true, videoRef.current.currentTime);
   };
 
   const skipForward = () => {
@@ -577,6 +635,20 @@ export function EpisodeWatchClient({ episodeId }: EpisodeWatchClientProps) {
 
   const { prev, next } = getAdjacentEpisodes();
 
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (!room?.code || !participantId) return;
+
+      navigator.sendBeacon(
+        `/api/rooms/episode/${room.code}/leave`,
+        new Blob([JSON.stringify({ participantId })], { type: "application/json" })
+      );
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [room?.code, participantId]);
+
   const openChat = () => {
     setChatOpen(true);
     setUnreadCount(0);
@@ -621,6 +693,7 @@ export function EpisodeWatchClient({ episodeId }: EpisodeWatchClientProps) {
                 controls
                 className="w-full h-full"
                 onSeeked={handleSeeked}
+                onTimeUpdate={handleTimeUpdate}
                 onPlay={() => {
                   if (!isSyncing && room && !isUserActionRef.current) {
                     updateRoomState(true, videoRef.current?.currentTime ?? 0);

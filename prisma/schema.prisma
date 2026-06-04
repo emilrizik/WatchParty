@@ -195,15 +195,18 @@ model EpisodeRoomParticipant {
   id         String   @id @default(cuid())
   roomId     String
   odysId     String?  // Optional user ID
-  guestName  String   @default("Invitado")
-  joinedAt   DateTime @default(now())
-  isActive   Boolean  @default(true)
+  guestName      String   @default("Invitado")
+  guestSessionId String?
+  joinedAt       DateTime @default(now())
+  lastSeenAt     DateTime @default(now())
+  isActive       Boolean  @default(true)
   
   room       EpisodeRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
   user       User?       @relation(fields: [odysId], references: [id], onDelete: Cascade)
   
   @@index([roomId])
   @@index([odysId])
+  @@index([roomId, guestSessionId])
 }
 
 model Room {
@@ -238,15 +241,18 @@ model RoomParticipant {
   id         String   @id @default(cuid())
   roomId     String
   odysId     String?  // Optional user ID
-  guestName  String   @default("Invitado")
-  joinedAt   DateTime @default(now())
-  isActive   Boolean  @default(true)
+  guestName      String   @default("Invitado")
+  guestSessionId String?
+  joinedAt       DateTime @default(now())
+  lastSeenAt     DateTime @default(now())
+  isActive       Boolean  @default(true)
   
   room       Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
   user       User?    @relation(fields: [odysId], references: [id], onDelete: Cascade)
   
   @@index([roomId])
   @@index([odysId])
+  @@index([roomId, guestSessionId])
 }
 
 model RoomMessage {

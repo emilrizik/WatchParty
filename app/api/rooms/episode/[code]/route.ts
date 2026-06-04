@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getFileUrl } from "@/lib/s3";
+import {
+  cleanupEpisodeRoomPresence,
+  touchEpisodeParticipant,
+} from "@/lib/room-presence";
 
 export const dynamic = "force-dynamic";
 
@@ -10,9 +14,28 @@ export async function GET(
 ) {
   try {
     const { code } = await params;
+    const participantId = req.nextUrl.searchParams.get("participantId");
 
     const room = await prisma.episodeRoom.findUnique({
       where: { code: code.toUpperCase() },
+      select: { id: true, isActive: true },
+    });
+
+    if (!room || !room.isActive) {
+      return NextResponse.json({ error: "Room not found" }, { status: 404 });
+    }
+
+    if (participantId) {
+      await touchEpisodeParticipant(room.id, participantId);
+    }
+
+    const activeParticipants = await cleanupEpisodeRoomPresence(room.id);
+    if (activeParticipants === 0) {
+      return NextResponse.json({ error: "Room not found" }, { status: 404 });
+    }
+
+    const hydratedRoom = await prisma.episodeRoom.findUnique({
+      where: { id: room.id },
       include: {
         participants: {
           where: { isActive: true },
@@ -37,26 +60,25 @@ export async function GET(
       },
     });
 
-    if (!room || !room.isActive) {
+    if (!hydratedRoom || !hydratedRoom.isActive) {
       return NextResponse.json({ error: "Room not found" }, { status: 404 });
     }
 
-    // Generate episode URL
     const videoUrl = await getFileUrl(
-      room.episode.cloud_storage_path,
-      room.episode.isPublic
+      hydratedRoom.episode.cloud_storage_path,
+      hydratedRoom.episode.isPublic
     );
-    const thumbnailUrl = room.episode.thumbnail_path
+    const thumbnailUrl = hydratedRoom.episode.thumbnail_path
       ? await getFileUrl(
-          room.episode.thumbnail_path,
-          room.episode.thumbnailIsPublic
+          hydratedRoom.episode.thumbnail_path,
+          hydratedRoom.episode.thumbnailIsPublic
         )
       : null;
 
     return NextResponse.json({
-      ...room,
+      ...hydratedRoom,
       episode: {
-        ...room.episode,
+        ...hydratedRoom.episode,
         videoUrl,
         thumbnailUrl,
       },

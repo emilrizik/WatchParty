@@ -17,6 +17,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { setStoredRoomParticipant } from "@/lib/client-storage";
+import {
+  getOrCreateGuestSessionId,
+  getStoredGuestName,
+  setStoredGuestName,
+} from "@/lib/guest-session";
 
 interface Video {
   id: string;
@@ -88,6 +94,11 @@ export function DashboardClient() {
   const [joining, setJoining] = useState(false);
 
   useEffect(() => {
+    setJoinName(getStoredGuestName());
+    getOrCreateGuestSessionId();
+  }, []);
+
+  useEffect(() => {
     fetchData();
     fetchActiveRooms();
     // Poll active rooms every 10 seconds
@@ -121,21 +132,25 @@ export function DashboardClient() {
         ? "/api/rooms/episode/join" 
         : "/api/rooms/join";
       
+      const guestSessionId = getOrCreateGuestSessionId();
+      const normalizedName = joinName.trim();
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           code: selectedRoom.code, 
-          guestName: joinName.trim() 
+          guestName: normalizedName,
+          guestSessionId 
         }),
       });
 
       if (res.ok) {
         const data = await res.json();
-        localStorage.setItem(`room_${selectedRoom.code}_participant`, JSON.stringify({
+        setStoredGuestName(normalizedName);
+        setStoredRoomParticipant(selectedRoom.code, {
           id: data.participantId,
-          name: joinName.trim(),
-        }));
+          name: normalizedName,
+        });
         
         if (selectedRoom.type === "episode") {
           router.push(`/watch/episode/${data.episode.id}?room=${selectedRoom.code}`);

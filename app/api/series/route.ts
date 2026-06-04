@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/db";
+import { resolveAdminWriterUserId } from "@/lib/admin-write-access";
 import { getFileUrl } from "@/lib/s3";
 
 export const dynamic = "force-dynamic";
@@ -73,8 +72,8 @@ export async function GET(req: NextRequest) {
 // POST create new series
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.id) {
+    const writerUserId = await resolveAdminWriterUserId();
+    if (!writerUserId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -91,7 +90,7 @@ export async function POST(req: NextRequest) {
         categoryId: categoryId || null,
         thumbnail_path,
         thumbnailIsPublic: thumbnailIsPublic ?? true,
-        uploadedById: session.user.id,
+        uploadedById: writerUserId,
       },
     });
 

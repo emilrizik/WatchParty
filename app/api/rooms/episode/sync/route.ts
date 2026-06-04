@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import {
+  cleanupEpisodeRoomPresence,
+  touchEpisodeParticipant,
+} from "@/lib/room-presence";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +15,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Room code is required" }, { status: 400 });
     }
 
-    // Find room
+    if (!participantId) {
+      return NextResponse.json({ error: "participantId is required" }, { status: 400 });
+    }
+
     const room = await prisma.episodeRoom.findUnique({
       where: { code: roomCode.toUpperCase() },
     });
@@ -20,16 +27,33 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Room not found" }, { status: 404 });
     }
 
-    // Build update data
-    const updateData: any = {
+    const participantIsActive = await touchEpisodeParticipant(room.id, participantId);
+    if (!participantIsActive) {
+      return NextResponse.json(
+        { error: "Participant not active in room" },
+        { status: 409 }
+      );
+    }
+
+    const activeParticipants = await cleanupEpisodeRoomPresence(room.id);
+    if (activeParticipants === 0) {
+      return NextResponse.json({ error: "Room not found" }, { status: 404 });
+    }
+
+    const updateData: {
+      lastUpdatedAt: Date;
+      lastUpdatedBy: string;
+      isPlaying?: boolean;
+      currentTime?: number;
+      episodeId?: string;
+    } = {
       lastUpdatedAt: new Date(),
-      lastUpdatedBy: participantId || null,
+      lastUpdatedBy: participantId,
     };
 
     if (isPlaying !== undefined) updateData.isPlaying = isPlaying;
     if (currentTime !== undefined) updateData.currentTime = currentTime;
-    
-    // Si se cambia de episodio, actualizar y resetear tiempo
+
     if (episodeId && episodeId !== room.episodeId) {
       updateData.episodeId = episodeId;
       updateData.currentTime = 0;

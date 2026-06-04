@@ -7,6 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { setStoredRoomParticipant } from "@/lib/client-storage";
+import {
+  getOrCreateGuestSessionId,
+  getStoredGuestName,
+  setStoredGuestName,
+} from "@/lib/guest-session";
 
 interface RoomInfo {
   id: string;
@@ -34,6 +40,8 @@ export default function JoinRoomPage() {
   const router = useRouter();
 
   useEffect(() => {
+    setGuestName(getStoredGuestName());
+
     if (!code) return;
     
     const fetchRoomInfo = async () => {
@@ -78,19 +86,22 @@ export default function JoinRoomPage() {
       const isEpisodeRoom = roomInfo?.episode;
       const endpoint = isEpisodeRoom ? "/api/rooms/episode/join" : "/api/rooms/join";
       
+      const normalizedName = guestName.trim();
+      const guestSessionId = getOrCreateGuestSessionId();
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, guestName: guestName.trim() }),
+        body: JSON.stringify({ code, guestName: normalizedName, guestSessionId }),
       });
 
       if (res.ok) {
         const data = await res.json();
         // Store participant info in localStorage
-        localStorage.setItem(`room_${code}_participant`, JSON.stringify({
+        setStoredGuestName(normalizedName);
+        setStoredRoomParticipant(code, {
           id: data.participantId,
-          name: guestName.trim(),
-        }));
+          name: normalizedName,
+        });
         
         // Redirect to watch page
         if (isEpisodeRoom) {
@@ -184,7 +195,7 @@ export default function JoinRoomPage() {
             
             <Button
               type="submit"
-              disabled={joining}
+              disabled={joining || !guestName.trim()}
               className="w-full bg-primary hover:bg-primary/90"
             >
               {joining ? (

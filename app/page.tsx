@@ -1,5 +1,7 @@
-import { redirect } from "next/navigation";
+import { DashboardClient } from "./dashboard/_components/dashboard-client";
 
-export default async function Home() {
-  redirect("/dashboard");
+export const dynamic = "force-dynamic";
+
+export default function Home() {
+  return <DashboardClient />;
 }
